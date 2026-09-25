@@ -28,9 +28,6 @@
     "README.md",
     "LICENSE"
   ],
-  "bin": {
-    "ovp": "bin/ovp"
-  },
   "dependencies": {
     "typebox": "^1.1.38"
   },
