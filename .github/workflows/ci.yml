@@ -22,34 +22,48 @@ jobs:
       - run: npm test
 
   engine:
-    name: engine (builds, metadata checks)
+    name: engine (build + OCR smoke test)
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+
       - name: Build the Swift engine
         run: swift build -c release
-      - name: Smoke-test the CLI surface that the plugin relies on
+
+      - name: Check the CLI surface the plugin relies on
         run: |
           ./.build/release/ovp version
           ./.build/release/ovp --help | grep -q "inspect"
-          # `ovp windows` works without permissions (empty list is fine in CI)
           ./.build/release/ovp windows | head -5 || true
-          # A real end-to-end run on a generated image: render text with PIL, then inspect it.
-          python3 -m pip install --quiet pillow
-          python3 - <<'PY'
+
+      - name: Render a fixture image (no screenshots are ever committed)
+        run: |
+          # Homebrew Python on the runner is externally managed (PEP 668), so use a venv.
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet pillow
+          "$RUNNER_TEMP/venv/bin/python" - <<'PY'
           from PIL import Image, ImageDraw, ImageFont
-          img = Image.new("RGB", (800, 300), (255, 255, 255))
+          img = Image.new("RGB", (900, 320), (255, 255, 255))
           d = ImageDraw.Draw(img)
           try:
-              f = ImageFont.truetype("/System/Library/Fonts/Supplemental/Songti.ttc", 40)
+              font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Songti.ttc", 44)
           except Exception:
-              f = ImageFont.load_default()
-          d.text((40, 60), "OVP CI fixture", font=f, fill=(0, 0, 0))
-          d.text((40, 140), "revenue 1234567", font=f, fill=(0, 0, 0))
+              font = ImageFont.load_default()
+          d.text((40, 50), "OVP CI fixture", font=font, fill=(0, 0, 0))
+          d.text((40, 140), "revenue 1234567", font=font, fill=(0, 0, 0))
+          d.text((40, 220), "error: sample failure text", font=font, fill=(150, 0, 0))
           img.save("/tmp/ci-fixture.png")
+          print("fixture written")
           PY
+
+      - name: Inspect the fixture end to end
+        run: |
           OUT=$(./.build/release/ovp inspect /tmp/ci-fixture.png --max-chars 1200 --no-cache)
           echo "$OUT"
-          echo "$OUT" | grep -q "HEADLINE:" || { echo "missing HEADLINE"; exit 1; }
-          echo "$OUT" | grep -q "MORE:" || { echo "missing follow-up contract line"; exit 1; }
-          echo "$OUT" | grep -q "OVP CI fixture" || { echo "OCR did not read the fixture"; exit 1; }
+          echo "$OUT" | grep -q "HEADLINE:"      || { echo "::error::missing HEADLINE line"; exit 1; }
+          echo "$OUT" | grep -q "MORE:"          || { echo "::error::missing follow-up contract line"; exit 1; }
+          echo "$OUT" | grep -q "OVP CI fixture" || { echo "::error::OCR did not read the fixture"; exit 1; }
+          # the contract must survive a tiny budget: HEADLINE is never dropped
+          HEAD=$(./.build/release/ovp inspect /tmp/ci-fixture.png --headline-only --max-chars 240 --no-cache)
+          echo "$HEAD" | grep -q "HEADLINE:" || { echo "::error::HEADLINE dropped at a small budget"; exit 1; }
+          echo "smoke test OK"
