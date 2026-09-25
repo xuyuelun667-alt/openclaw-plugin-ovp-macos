@@ -2,8 +2,11 @@
 node_modules/
 dist/
 .build/
-bin/
 *.tsbuildinfo
+
+# NOTE: bin/ovp IS committed on purpose — plugin install runs with --ignore-scripts, so the
+# engine cannot be built during install. Shipping the universal binary keeps
+# `openclaw plugins install clawhub:...` a one-liner (see README).
 
 # local research reports contain real screen content (private) — never publish
 RECON.md
@@ -17,8 +20,8 @@ docs/private/
 *.png
 *.jpg
 
-# macOS
-.DS_Store
-
 # packaging artifact
 *.tgz
+
+# macOS
+.DS_Store

@@ -1,5 +1,5 @@
 {
-  "name": "openclaw-plugin-ovp-macos",
+  "name": "@xuyuelun667-alt/ovp-macos",
   "version": "0.1.0",
   "description": "macOS visual input substitute for text-only agents: local Apple Vision OCR + Accessibility structure -> compact, priority-ranked Visual State for OpenClaw.",
   "type": "module",
@@ -23,6 +23,7 @@
   },
   "files": [
     "dist",
+    "bin/ovp",
     "openclaw.plugin.json",
     "README.md",
     "LICENSE"
@@ -55,8 +56,13 @@
     "build": {
       "openclawVersion": "2026.9.1"
     },
+    "install": {
+      "clawhubSpec": "clawhub:xuyuelun667-alt/ovp-macos",
+      "defaultChoice": "clawhub",
+      "minHostVersion": ">=2026.5.17"
+    },
     "release": {
-      "publishToClawHub": false
+      "publishToClawHub": true
     }
   }
 }

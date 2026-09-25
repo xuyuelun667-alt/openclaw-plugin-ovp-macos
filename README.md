@@ -37,19 +37,42 @@ That last row is the part a VLM cannot replace: OVP tells the agent *where* thin
 
 ## Install
 
-Requirements: macOS, Node 22.22.3+ / 24.15+ / 25.9+, and (for the engine) Xcode Command Line Tools.
+Requirements: macOS. The published package ships a **prebuilt universal engine** (`bin/ovp`, arm64 + x86_64),
+so installing it does not need a Swift toolchain. Rebuilding from source does (Xcode Command Line
+Tools).
+
+**From ClawHub (after publishing):**
 
 ```bash
-git clone <this-repo> openclaw-plugin-ovp-macos
-cd openclaw-plugin-ovp-macos
+openclaw plugins install clawhub:@xuyuelun667-alt/ovp-macos
+```
 
+**From npm:**
+
+```bash
+openclaw plugins install npm:@xuyuelun667-alt/ovp-macos
+```
+
+**From source (development, or to verify the packaged artifact):**
+
+```bash
 npm install
-npm run build:engine     # swift build -c release -> ./bin/ovp
+npm run build:engine     # universal swift build -> ./bin/ovp (atomic replace, see note below)
 npm run build            # tsc -> ./dist
 npm test                 # unit tests (no network, no permissions needed)
 
-openclaw plugins install npm-pack:$(npm pack --silent)   # local proof install
+openclaw plugins install "npm-pack:$(npm pack --silent)" --force --accept-capabilities
 ```
+
+Why a prebuilt binary is shipped: `openclaw plugins install` installs dependencies with
+`npm install --omit=dev --ignore-scripts`, so a package **cannot** build its own engine at install
+time. `bin/ovp` is committed on purpose (≈1.4 MB, universal). Two supporting details:
+
+- The plugin resolves `bin/ovp` from its own package root; if a tarball ever drops the executable
+  bit, it copies the binary into `~/.cache/ovp/bin/` and chmods it there.
+- **Never overwrite a signed Mach-O in place.** Replacing `bin/ovp` in place can leave the kernel's
+  code-signature cache stale and the next exec is killed with SIGKILL (exit 137 — hit for real while
+  building this). `scripts/build-engine.sh` writes to a temp name and `mv`s it into place.
 
 Then verify permissions **before** trusting anything:
 

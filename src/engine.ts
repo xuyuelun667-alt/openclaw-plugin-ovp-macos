@@ -1,6 +1,17 @@
 import { spawn } from "node:child_process";
-import { accessSync, constants, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+  accessSync,
+  chmodSync,
+  constants,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
 /** Minimal shape of `ovp inspect --json` we depend on. */
@@ -51,6 +62,27 @@ function isExecutable(p: string): boolean {
 }
 
 /**
+ * npm and ClawHub tarballs can drop the executable bit, and plugin install forbids lifecycle
+ * scripts, so the engine cannot chmod itself at install time. If the shipped binary exists but
+ * is not executable, copy it into the user cache and chmod it there.
+ */
+function ensureExecutable(candidate: string): string | null {
+  if (isExecutable(candidate)) return candidate;
+  try {
+    if (!existsSync(candidate) || !statSync(candidate).isFile()) return null;
+    const dir = join(homedir(), ".cache", "ovp", "bin");
+    mkdirSync(dir, { recursive: true });
+    const dest = join(dir, "ovp");
+    const same = existsSync(dest) && statSync(dest).size === statSync(candidate).size;
+    if (!same) copyFileSync(candidate, dest);
+    chmodSync(dest, 0o755);
+    return isExecutable(dest) ? dest : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Binary resolution order (documented in README):
  *   configured path -> OVP_BIN -> <pluginRoot>/bin/ovp -> ovp on PATH
  */
@@ -65,7 +97,7 @@ export function resolveBinary(opts: {
   const add = (candidate: string | undefined): string | null => {
     if (!candidate) return null;
     tried.push(candidate);
-    return isExecutable(candidate) ? candidate : null;
+    return ensureExecutable(candidate);
   };
 
   let hit = add(opts.configuredPath);
