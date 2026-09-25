@@ -71,6 +71,8 @@ openclaw config set agents.defaults.imageModel.primary ovp-macos/ovp-local
 openclaw config set tools.media.image.maxChars 1500
 # 3. keep the provider as the preferred candidate
 openclaw config set tools.media.image.preferredModel ovp-macos
+# 4. make the tool visible to the agent (see the pitfall below)
+openclaw config set tools.alsoAllow '["visual_inspect"]'
 
 openclaw daemon restart     # plugins load at gateway startup
 ```
@@ -95,6 +97,31 @@ openclaw infer image describe --file /path/to/shot.png --json | grep provider
 
 On the reference machine this returned `provider=ovp-macos` with a 726-character state for a
 1000×600 fixture, and the `ESCALATE` line for a screenshot containing a dialog.
+
+### Pitfall: `tools.allow` hides every profile tool — use `tools.alsoAllow`
+
+Plugin tools are **not** part of the `coding` profile (`group:openclaw` deliberately excludes plugin
+tools), so an installed plugin tool is registered but invisible to the model. The obvious-looking
+fix is wrong:
+
+```bash
+# ❌ REPLACES the profile's base allowlist — the agent then loses exec/read/web as well
+openclaw config set tools.allow '["visual_inspect"]'
+# ✅ additive: keeps the profile and adds the plugin tool
+openclaw config set tools.alsoAllow '["visual_inspect"]'
+# or every loaded plugin's tools: openclaw config set tools.alsoAllow '["group:plugins"]'
+```
+
+`allow` and `alsoAllow` are mutually exclusive in the same scope. Verify with:
+
+```bash
+openclaw gateway call tools.effective --params '{"sessionKey":"main","agentId":"main"}' --json | grep -i visual_inspect
+openclaw agent --session-key agent:main:ovp-check -m "调用 visual_inspect，mode=doctor，贴返回前 6 行"
+```
+
+Observed after wiring on the reference host: image understanding resolves to `provider=ovp-macos`, and
+an agent turn itself returned a full `OVP doctor — OK` block (engine, Accessibility, Screen Recording,
+plus a live capture smoke test and ~190 Accessibility elements from the frontmost window).
 
 ### Fallback: use the engine without the plugin
 
