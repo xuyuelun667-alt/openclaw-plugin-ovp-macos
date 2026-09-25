@@ -58,6 +58,60 @@ npm run doctor
 # or, through the agent:  visual_inspect { "mode": "doctor" }
 ```
 
+## Wiring into OpenClaw (required — the plugin does not self-select)
+
+Measured behaviour: an installed plugin provider is **not** picked automatically for image
+understanding. Three config writes wire it, and one of them also repairs a latent default:
+
+```bash
+# 1. send images to the local provider
+openclaw config set agents.defaults.imageModel.primary ovp-macos/ovp-local
+# 2. raise the capability budget: the image-understanding default is 500 chars,
+#    which silently truncates the Visual State (fixed overhead alone is ~460)
+openclaw config set tools.media.image.maxChars 1500
+# 3. keep the provider as the preferred candidate
+openclaw config set tools.media.image.preferredModel ovp-macos
+
+openclaw daemon restart     # plugins load at gateway startup
+```
+
+Two gotchas worth knowing:
+
+- **A restart is required after install.** Plugin tools are registered at startup, so until the
+  gateway restarts, `visual_inspect` is simply absent from the agent's tool list and the media
+  provider is unused. (`openclaw plugins inspect <id> --runtime` will already report the
+  registrations — that reflects the manifest, not the running agent.)
+- **An explicit `tools.media.models[]` entry wins over `preferredModel`.** If your config carries a
+  hand-written model list (for example the raw CLI wrapper `ovp inspect {{AttachmentPath}}`), it
+  takes precedence and both `preferredModel` and `imageModel` are ignored. Remove that entry when
+  you switch to the plugin.
+
+Verify the wiring with:
+
+```bash
+openclaw infer image describe --file /path/to/shot.png --json | grep provider
+# expected: "provider": "ovp-macos"
+```
+
+On the reference machine this returned `provider=ovp-macos` with a 726-character state for a
+1000×600 fixture, and the `ESCALATE` line for a screenshot containing a dialog.
+
+### Fallback: use the engine without the plugin
+
+If you prefer not to install a plugin, the same engine plugs into `tools.media` as a CLI entry:
+
+```json5
+{ tools: { media: { models: [{
+  type: "cli",
+  command: "/absolute/path/to/ovp",
+  args: ["inspect", "{{AttachmentPath}}", "--level", "normal", "--max-chars", "{{MaxChars}}"],
+  capabilities: ["image"], maxChars: 1500, maxBytes: 10485760, timeoutSeconds: 20
+}] } } }
+```
+
+This path was the development harness and is fully verified (it is the source of every number in
+this README), but it has no `visual_inspect` tool and no `doctor`; the plugin adds those.
+
 ## Permissions (this is where macOS plugins usually die silently)
 
 OVP needs two grants, given to **the process that runs OpenClaw** (the Gateway/node binary) — child processes inherit them, so `ovp` never needs its own entry:
@@ -168,11 +222,11 @@ The engine is a plain CLI (`ovp inspect …`, `ovp windows`, `ovp ax-check`), so
 ## Development
 
 ```bash
-npm run build:engine     # engine
-npm run build            # plugin
+npm run build:engine     # engine (Swift -> ./bin/ovp; restarts a warm daemon)
+npm run build            # plugin (TypeScript -> ./dist)
 npm test                 # unit tests
-npm run doctor           # permissions
-npm run plugin:validate  # manifest/runtime validation
+npm run doctor           # permission + engine preflight
+npm run plugin:inspect   # runtime state of the installed plugin
 ```
 
 ## License

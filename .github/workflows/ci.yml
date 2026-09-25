@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  plugin:
+    name: plugin (unit tests)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # Unit tests are hermetic: no network, no Accessibility/Screen Recording
+      # permissions, no engine binary required.
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+      - run: npm test
+
+  engine:
+    name: engine (builds, metadata checks)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the Swift engine
+        run: swift build -c release
+      - name: Smoke-test the CLI surface that the plugin relies on
+        run: |
+          ./.build/release/ovp version
+          ./.build/release/ovp --help | grep -q "inspect"
+          # `ovp windows` works without permissions (empty list is fine in CI)
+          ./.build/release/ovp windows | head -5 || true
+          # A real end-to-end run on a generated image: render text with PIL, then inspect it.
+          python3 -m pip install --quiet pillow
+          python3 - <<'PY'
+          from PIL import Image, ImageDraw, ImageFont
+          img = Image.new("RGB", (800, 300), (255, 255, 255))
+          d = ImageDraw.Draw(img)
+          try:
+              f = ImageFont.truetype("/System/Library/Fonts/Supplemental/Songti.ttc", 40)
+          except Exception:
+              f = ImageFont.load_default()
+          d.text((40, 60), "OVP CI fixture", font=f, fill=(0, 0, 0))
+          d.text((40, 140), "revenue 1234567", font=f, fill=(0, 0, 0))
+          img.save("/tmp/ci-fixture.png")
+          PY
+          OUT=$(./.build/release/ovp inspect /tmp/ci-fixture.png --max-chars 1200 --no-cache)
+          echo "$OUT"
+          echo "$OUT" | grep -q "HEADLINE:" || { echo "missing HEADLINE"; exit 1; }
+          echo "$OUT" | grep -q "MORE:" || { echo "missing follow-up contract line"; exit 1; }
+          echo "$OUT" | grep -q "OVP CI fixture" || { echo "OCR did not read the fixture"; exit 1; }
