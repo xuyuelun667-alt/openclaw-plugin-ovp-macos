@@ -15,9 +15,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      # Unit tests are hermetic: no network, no Accessibility/Screen Recording
-      # permissions, no engine binary required.
-      - run: npm install --no-audit --no-fund
+      # Hermetic: no Accessibility/Screen Recording permissions, no engine binary needed.
+      # --ignore-scripts because the `openclaw` devDependency refuses to install on Node 22
+      # (its preinstall gate wants Node >=24.16); we only need its type declarations here.
+      - run: npm install --no-audit --no-fund --ignore-scripts
       - run: npm run build
       - run: npm test
 
