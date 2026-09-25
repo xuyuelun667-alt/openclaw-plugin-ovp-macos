@@ -2,7 +2,7 @@
   "id": "ovp-macos",
   "name": "OVP Visual Preprocessor (macOS)",
   "description": "Gives text-only OpenClaw agents eyes on macOS: local OCR + Accessibility structure compressed into a priority-ranked Visual State, so a screenshot costs ~350 tokens instead of a screenshot-reading detour.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "contracts": {
     "mediaUnderstandingProviders": [
       "ovp-macos"
@@ -11,6 +11,13 @@
       "visual_inspect"
     ]
   },
+  "cliCommands": [
+    {
+      "name": "ovp",
+      "description": "OVP Visual Preprocessor (macOS): setup and diagnostics",
+      "hasSubcommands": true
+    }
+  ],
   "activation": {
     "onStartup": true,
     "capabilities": [

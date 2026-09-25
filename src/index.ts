@@ -13,6 +13,7 @@ import {
   type OvpState,
 } from "./engine.js";
 import { formatDoctor, runDoctor } from "./doctor.js";
+import { applyOps, planSetup, readSnapshot, restartHint, setupWarnings } from "./setup.js";
 
 const PLUGIN_ID = "ovp-macos";
 const PROVIDER_ID = "ovp-macos";
@@ -189,6 +190,65 @@ export default definePluginEntry({
         };
       },
     });
+    // ---- capability 3: `openclaw ovp setup` / `openclaw ovp doctor` ----
+    // Wiring is the step people miss, so it gets a command instead of a README paragraph.
+    api.registerCli(
+      async ({ program }) => {
+        const ovp = program.command("ovp").description("OVP Visual Preprocessor (macOS): setup and diagnostics");
+
+        ovp
+          .command("setup")
+          .description("Wire OVP into this OpenClaw install (image model, budget, tool visibility)")
+          .option("--dry-run", "print the plan without writing config", false)
+          .action(async (opts: { dryRun?: boolean }) => {
+            const snapshot = readSnapshot();
+            const ops = planSetup(snapshot);
+            const warnings = setupWarnings(snapshot);
+
+            console.log(`OVP setup${opts.dryRun ? " (dry run)" : ""}`);
+            if (ops.length === 0) {
+              console.log("  already wired — nothing to change");
+            } else {
+              for (const op of ops) console.log(`  ${op.path} = ${op.value}\n      why: ${op.why}`);
+            }
+
+            const results = applyOps(ops, Boolean(opts.dryRun));
+            const failed = results.filter((r) => !r.ok);
+            if (failed.length > 0) {
+              console.log("\nFailed writes (run them by hand if needed):");
+              for (const f of failed) console.log(`  openclaw config set ${f.path} ...   -> ${f.detail}`);
+            }
+
+            const report = await runDoctor({ configuredPath: cfg.path, pluginRoot, timeoutMs });
+            console.log(`\nPermissions/engine: ${report.ok ? "OK" : "PROBLEMS FOUND"}`);
+            for (const c of report.checks) {
+              console.log(`  ${c.ok ? "ok  " : "FAIL"} ${c.id}: ${c.detail}`);
+              if (!c.ok && c.fix) console.log(`        fix: ${c.fix}`);
+            }
+
+            for (const w of warnings) console.log(`\nwarning: ${w}`);
+            console.log(`\n${restartHint()}`);
+          });
+
+        ovp
+          .command("doctor")
+          .description("Check engine + Accessibility/Screen Recording permissions")
+          .action(async () => {
+            const report = await runDoctor({ configuredPath: cfg.path, pluginRoot, timeoutMs });
+            console.log(formatDoctor(report));
+            process.exitCode = report.ok ? 0 : 1;
+          });
+      },
+      {
+        descriptors: [
+          {
+            name: "ovp",
+            description: "OVP Visual Preprocessor (macOS): setup and diagnostics",
+            hasSubcommands: true,
+          },
+        ],
+      },
+    );
   },
 });
 

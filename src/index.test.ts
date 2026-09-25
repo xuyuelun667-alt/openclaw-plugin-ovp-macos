@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { buildInspectArgs, escalationOf, parseOvpJson, parseOvpText, resolveBinary } from "./engine.js";
 import { formatDoctor } from "./doctor.js";
+import { planSetup, setupWarnings, PROVIDER_REF, TOOL_NAME, RUNTIME_MAX_CHARS } from "./setup.js";
 import entry from "./index.js";
 
 type Registered = {
   mediaProviders: Array<Record<string, unknown>>;
   tools: Array<Record<string, unknown>>;
+  cliRegistrations: Array<{ registrar: unknown; opts?: Record<string, unknown> }>;
 };
 
 function registerWithStubApi(pluginConfig: Record<string, unknown> = {}): Registered {
-  const out: Registered = { mediaProviders: [], tools: [] };
+  const out: Registered = { mediaProviders: [], tools: [], cliRegistrations: [] };
   const api = {
     id: "ovp-macos",
     rootDir: "/tmp/ovp-macos-test",
@@ -20,6 +22,9 @@ function registerWithStubApi(pluginConfig: Record<string, unknown> = {}): Regist
     },
     registerTool(t: Record<string, unknown>) {
       out.tools.push(t);
+    },
+    registerCli(registrar: unknown, opts?: Record<string, unknown>) {
+      out.cliRegistrations.push({ registrar, opts });
     },
   };
   entry.register(api as never);
@@ -52,6 +57,15 @@ describe("ovp-macos plugin", () => {
     for (const source of ["screen", "window", "file"]) {
       expect(schema).toContain(source);
     }
+  });
+
+  it("registers the `ovp` CLI command declared in the manifest", () => {
+    const { cliRegistrations } = registerWithStubApi();
+    expect(cliRegistrations).toHaveLength(1);
+    const descriptors = (cliRegistrations[0]!.opts as { descriptors?: Array<Record<string, unknown>> })
+      .descriptors;
+    expect(descriptors?.[0]).toMatchObject({ name: "ovp", hasSubcommands: true });
+    expect(typeof cliRegistrations[0]!.registrar).toBe("function");
   });
 
   it("honours plugin config for level and maxChars", () => {
@@ -126,6 +140,44 @@ describe("binary resolution", () => {
   it("falls back to OVP_BIN when no configured path is set", () => {
     const { tried } = resolveBinary({ env: { OVP_BIN: "/x/ovp" } as NodeJS.ProcessEnv, pathEntries: [] });
     expect(tried[0]).toBe("/x/ovp");
+  });
+});
+
+describe("setup planning", () => {
+  it("plans every write on a fresh install", () => {
+    const ops = planSetup({ explicitMediaModels: false });
+    expect(ops.map((o) => o.path)).toEqual([
+      "agents.defaults.imageModel.primary",
+      "tools.media.image.maxChars",
+      "tools.media.image.preferredModel",
+      "tools.alsoAllow",
+    ]);
+    expect(ops[0]!.value).toBe(JSON.stringify(PROVIDER_REF));
+    expect(ops[1]!.value).toBe(String(RUNTIME_MAX_CHARS));
+    expect(JSON.parse(ops[3]!.value)).toEqual([TOOL_NAME]);
+  });
+
+  it("is a no-op on an already wired install", () => {
+    const ops = planSetup({
+      imageModelPrimary: PROVIDER_REF,
+      mediaImageMaxChars: RUNTIME_MAX_CHARS,
+      mediaPreferredModel: "ovp-macos",
+      alsoAllow: [TOOL_NAME],
+      explicitMediaModels: false,
+    });
+    expect(ops).toEqual([]);
+  });
+
+  it("appends to an existing alsoAllow instead of clobbering it", () => {
+    const ops = planSetup({ alsoAllow: ["memory_search", "web_search"], explicitMediaModels: false });
+    const allow = ops.find((o) => o.path === "tools.alsoAllow");
+    expect(allow).toBeDefined();
+    expect(JSON.parse(allow!.value)).toEqual(["memory_search", "web_search", TOOL_NAME]);
+  });
+
+  it("warns about an explicit media model list that would take precedence", () => {
+    expect(setupWarnings({ explicitMediaModels: true })).toHaveLength(1);
+    expect(setupWarnings({ explicitMediaModels: false })).toHaveLength(0);
   });
 });
 

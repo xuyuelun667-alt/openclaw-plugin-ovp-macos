@@ -81,10 +81,21 @@ npm run doctor
 # or, through the agent:  visual_inspect { "mode": "doctor" }
 ```
 
-## Wiring into OpenClaw (required — the plugin does not self-select)
+## Wiring into OpenClaw
 
-Measured behaviour: an installed plugin provider is **not** picked automatically for image
-understanding. Three config writes wire it, and one of them also repairs a latent default:
+One command does the wiring (image model, budget, tool visibility) and then checks permissions:
+
+```bash
+openclaw ovp setup              # add --dry-run to preview the writes
+openclaw ovp doctor             # engine + Accessibility / Screen Recording preflight
+```
+
+`setup` prints every write before making it, applies them through `openclaw config set` (validated
+and audited by the host), and re-prints the restart step. It is idempotent — on an already wired
+install it reports `already wired — nothing to change`.
+
+<details>
+<summary>What `setup` writes (manual equivalent)</summary>
 
 ```bash
 # 1. send images to the local provider
@@ -99,6 +110,8 @@ openclaw config set tools.alsoAllow '["visual_inspect"]'
 
 openclaw daemon restart     # plugins load at gateway startup
 ```
+
+</details>
 
 Two gotchas worth knowing:
 

@@ -97,7 +97,7 @@ let rest = Array(argv.dropFirst())
 
 switch cmd {
 case "version":
-    out("ovp 0.1.0 (phase 1)")
+    out("ovp 0.2.0")
 
 case "help", "--help", "-h":
     out(usage)

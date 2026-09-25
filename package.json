@@ -1,6 +1,6 @@
 {
   "name": "@xuyuelun667-alt/ovp-macos",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "macOS visual input substitute for text-only agents: local Apple Vision OCR + Accessibility structure -> compact, priority-ranked Visual State for OpenClaw.",
   "type": "module",
   "license": "MIT",
@@ -28,6 +28,9 @@
     "README.md",
     "LICENSE"
   ],
+  "bin": {
+    "ovp": "bin/ovp"
+  },
   "dependencies": {
     "typebox": "^1.1.38"
   },
