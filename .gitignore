@@ -1,0 +1,24 @@
+# build artifacts
+node_modules/
+dist/
+.build/
+bin/
+*.tsbuildinfo
+
+# local research reports contain real screen content (private) — never publish
+RECON.md
+PHASE1_REPORT.md
+PHASE1_5_REPORT.md
+PHASE2_REPORT.md
+docs/private/
+
+# test scratch
+/tmp/
+*.png
+*.jpg
+
+# macOS
+.DS_Store
+
+# packaging artifact
+*.tgz

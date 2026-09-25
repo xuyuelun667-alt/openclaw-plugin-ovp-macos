@@ -1,0 +1,8 @@
+#!/bin/sh
+# Thin wrapper so `ovp inspect ...` works without a PATH install.
+BIN="$(cd "$(dirname "$0")" && pwd)/.build/release/ovp"
+if [ ! -x "$BIN" ]; then
+  echo "ovp: release binary missing; run: swift build -c release" >&2
+  exit 1
+fi
+exec "$BIN" "$@"

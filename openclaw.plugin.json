@@ -1,0 +1,55 @@
+{
+  "id": "ovp-macos",
+  "name": "OVP Visual Preprocessor (macOS)",
+  "description": "Gives text-only OpenClaw agents eyes on macOS: local OCR + Accessibility structure compressed into a priority-ranked Visual State, so a screenshot costs ~350 tokens instead of a screenshot-reading detour.",
+  "version": "0.1.0",
+  "contracts": {
+    "mediaUnderstandingProviders": [
+      "ovp-macos"
+    ],
+    "tools": [
+      "visual_inspect"
+    ]
+  },
+  "activation": {
+    "onStartup": true,
+    "capabilities": [
+      "media-understanding",
+      "tool"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Absolute path to the ovp binary. Defaults to OVP_BIN, <plugin>/bin/ovp, then ovp on PATH."
+      },
+      "level": {
+        "type": "string",
+        "enum": ["fast", "normal"],
+        "default": "normal",
+        "description": "fast = OCR + windows + Accessibility, no CV region segmentation."
+      },
+      "maxChars": {
+        "type": "integer",
+        "minimum": 200,
+        "maximum": 8000,
+        "default": 1500,
+        "description": "Budget for the injected compact text. Fixed overhead is ~460 chars (preamble + headline + follow-up contract)."
+      },
+      "timeoutMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 120000,
+        "default": 20000
+      },
+      "cache": {
+        "type": "boolean",
+        "default": true,
+        "description": "Reuse OCR/state cache between calls (keyed by raw pixel hash and state hash)."
+      }
+    }
+  }
+}

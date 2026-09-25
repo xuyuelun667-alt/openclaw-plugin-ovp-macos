@@ -1,0 +1,62 @@
+{
+  "name": "openclaw-plugin-ovp-macos",
+  "version": "0.1.0",
+  "description": "macOS visual input substitute for text-only agents: local Apple Vision OCR + Accessibility structure -> compact, priority-ranked Visual State for OpenClaw.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "macos",
+    "vision",
+    "ocr",
+    "accessibility",
+    "screenshot",
+    "computer-use"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --config ./vitest.config.ts",
+    "build:engine": "bash scripts/build-engine.sh",
+    "doctor": "bash scripts/doctor.sh",
+    "plugin:inspect": "openclaw plugins inspect ovp-macos --runtime --json"
+  },
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "typebox": "^1.1.38"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.5.17"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "clawhub": "latest",
+    "openclaw": "latest",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.5.17"
+    },
+    "build": {
+      "openclawVersion": "2026.9.1"
+    },
+    "release": {
+      "publishToClawHub": false
+    }
+  }
+}
