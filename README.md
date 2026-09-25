@@ -1,268 +1,234 @@
-# OVP — Visual Preprocessor for OpenClaw (macOS)
+# OVP — give a text-only agent eyes on macOS
 
-**Give a text-only OpenClaw agent eyes — locally, deterministically, and without burning an agent detour on every screenshot.**
+[![CI](https://github.com/xuyuelun667-alt/openclaw-plugin-ovp-macos/actions/workflows/ci.yml/badge.svg)](https://github.com/xuyuelun667-alt/openclaw-plugin-ovp-macos/actions/workflows/ci.yml)
+![Platform: macOS](https://img.shields.io/badge/platform-macOS-000000)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue)
+![Tests](https://img.shields.io/badge/tests-16%20passing-brightgreen)
+![Engine deps](https://img.shields.io/badge/engine%20deps-none-brightgreen)
 
-OVP turns a screenshot, a window, or the live screen into a **compact, priority-ranked Visual State** using macOS-native building blocks (Apple Vision OCR, CGWindowList, the Accessibility API). The state is injected as the agent's image input, so a text-only model can answer questions about what's on screen — and, crucially, it stops the agent from going off and re-inventing OCR with a dozen tool calls.
+**Your agent can't see. Paste a screenshot and it fails, then burns a dozen tool calls trying to OCR it itself. OVP replaces that whole detour with ~350 tokens of structured text — computed locally, in under half a second, with coordinates.**
 
-macOS-only, plugin-only. No models are trained, no image ever leaves the machine.
-
----
-
-## Why this exists
-
-With a text-only model, an inbound screenshot normally arrives as an unreadable reference. The agent then improvises: it tries `view_image` (fails — no vision), then reaches for some OCR script, crops regions, re-runs things, and often still can't answer. Measured on real tasks in this repository's development:
-
-| | no preprocessor | OVP |
-|---|---|---|
-| Tool calls for one image question | **11–16** (often without converging) | **0** |
-| Tokens burned per image task | ≈ +16k in / +10.6k out vs. baseline | +≈0.4k in (the injected state) |
-| Task cost | ≈ $0.02 | ≈ $0.0027 |
-| Time to first useful answer | tens of seconds of thrash | 0.14–0.41 s |
-| Data | may be sent to a third-party vision API | stays on the machine |
-
-The same comparison against a hosted vision model (MiniMax-VL-01, measured on the same images):
-
-| | OVP | hosted VLM |
-|---|---|---|
-| Cost per screenshot | **$0** | ≈ $0.0105 |
-| Latency | 0.14–0.41 s | 11.8–31.2 s |
-| Success rate | 6/6 | 6/8 (dense screenshots timed out) |
-| Determinism | same input → same output | two runs differed (similarity 0.564) |
-| Field-level accuracy (verifiable set) | 94% (16-field poster) / 100% (dialog ground truth) | 88% / 100% |
-| Coordinates, Accessibility roles, actions | ✅ | ❌ |
-
-That last row is the part a VLM cannot replace: OVP tells the agent *where* things are and *what can be pressed*.
-
----
-
-## Install
-
-Requirements: macOS. The published package ships a **prebuilt universal engine** (`bin/ovp`, arm64 + x86_64),
-so installing it does not need a Swift toolchain. Rebuilding from source does (Xcode Command Line
-Tools).
-
-**From ClawHub (after publishing):**
+An [OpenClaw](https://github.com/openclaw/openclaw) plugin (macOS) that turns a screenshot, a single
+window, or the live screen into a **compact, priority-ranked Visual State** using Apple Vision OCR,
+`CGWindowList`, and the Accessibility API — and injects it as the agent's image input.
 
 ```bash
 openclaw plugins install clawhub:@xuyuelun667-alt/ovp-macos
+openclaw ovp setup          # wires it up + checks permissions
 ```
 
-**From npm:**
+![OVP demo](docs/demo.svg)
 
-```bash
-openclaw plugins install npm:@xuyuelun667-alt/ovp-macos
-```
+---
 
-**From source (development, or to verify the packaged artifact):**
+## The problem, measured
 
-```bash
-npm install
-npm run build:engine     # universal swift build -> ./bin/ovp (atomic replace, see note below)
-npm run build            # tsc -> ./dist
-npm test                 # unit tests (no network, no permissions needed)
+A text-only model receiving a screenshot has nothing to work with. Real runs from building this
+plugin (same machine, same model, same image):
 
-openclaw plugins install "npm-pack:$(npm pack --silent)" --force --accept-capabilities
-```
-
-Why a prebuilt binary is shipped: `openclaw plugins install` installs dependencies with
-`npm install --omit=dev --ignore-scripts`, so a package **cannot** build its own engine at install
-time. `bin/ovp` is committed on purpose (≈1.4 MB, universal). Two supporting details:
-
-- The plugin resolves `bin/ovp` from its own package root; if a tarball ever drops the executable
-  bit, it copies the binary into `~/.cache/ovp/bin/` and chmods it there.
-- **Never overwrite a signed Mach-O in place.** Replacing `bin/ovp` in place can leave the kernel's
-  code-signature cache stale and the next exec is killed with SIGKILL (exit 137 — hit for real while
-  building this). `scripts/build-engine.sh` writes to a temp name and `mv`s it into place.
-
-Then verify permissions **before** trusting anything:
-
-```bash
-npm run doctor
-# or, through the agent:  visual_inspect { "mode": "doctor" }
-```
-
-## Wiring into OpenClaw
-
-One command does the wiring (image model, budget, tool visibility) and then checks permissions:
-
-```bash
-openclaw ovp setup              # add --dry-run to preview the writes
-openclaw ovp doctor             # engine + Accessibility / Screen Recording preflight
-```
-
-`setup` prints every write before making it, applies them through `openclaw config set` (validated
-and audited by the host), and re-prints the restart step. It is idempotent — on an already wired
-install it reports `already wired — nothing to change`.
-
-<details>
-<summary>What `setup` writes (manual equivalent)</summary>
-
-```bash
-# 1. send images to the local provider
-openclaw config set agents.defaults.imageModel.primary ovp-macos/ovp-local
-# 2. raise the capability budget: the image-understanding default is 500 chars,
-#    which silently truncates the Visual State (fixed overhead alone is ~460)
-openclaw config set tools.media.image.maxChars 1500
-# 3. keep the provider as the preferred candidate
-openclaw config set tools.media.image.preferredModel ovp-macos
-# 4. make the tool visible to the agent (see the pitfall below)
-openclaw config set tools.alsoAllow '["visual_inspect"]'
-
-openclaw daemon restart     # plugins load at gateway startup
-```
-
-</details>
-
-Two gotchas worth knowing:
-
-- **A restart is required after install.** Plugin tools are registered at startup, so until the
-  gateway restarts, `visual_inspect` is simply absent from the agent's tool list and the media
-  provider is unused. (`openclaw plugins inspect <id> --runtime` will already report the
-  registrations — that reflects the manifest, not the running agent.)
-- **An explicit `tools.media.models[]` entry wins over `preferredModel`.** If your config carries a
-  hand-written model list (for example the raw CLI wrapper `ovp inspect {{AttachmentPath}}`), it
-  takes precedence and both `preferredModel` and `imageModel` are ignored. Remove that entry when
-  you switch to the plugin.
-
-Verify the wiring with:
-
-```bash
-openclaw infer image describe --file /path/to/shot.png --json | grep provider
-# expected: "provider": "ovp-macos"
-```
-
-On the reference machine this returned `provider=ovp-macos` with a 726-character state for a
-1000×600 fixture, and the `ESCALATE` line for a screenshot containing a dialog.
-
-### Pitfall: `tools.allow` hides every profile tool — use `tools.alsoAllow`
-
-Plugin tools are **not** part of the `coding` profile (`group:openclaw` deliberately excludes plugin
-tools), so an installed plugin tool is registered but invisible to the model. The obvious-looking
-fix is wrong:
-
-```bash
-# ❌ REPLACES the profile's base allowlist — the agent then loses exec/read/web as well
-openclaw config set tools.allow '["visual_inspect"]'
-# ✅ additive: keeps the profile and adds the plugin tool
-openclaw config set tools.alsoAllow '["visual_inspect"]'
-# or every loaded plugin's tools: openclaw config set tools.alsoAllow '["group:plugins"]'
-```
-
-`allow` and `alsoAllow` are mutually exclusive in the same scope. Verify with:
-
-```bash
-openclaw gateway call tools.effective --params '{"sessionKey":"main","agentId":"main"}' --json | grep -i visual_inspect
-openclaw agent --session-key agent:main:ovp-check -m "调用 visual_inspect，mode=doctor，贴返回前 6 行"
-```
-
-Observed after wiring on the reference host: image understanding resolves to `provider=ovp-macos`, and
-an agent turn itself returned a full `OVP doctor — OK` block (engine, Accessibility, Screen Recording,
-plus a live capture smoke test and ~190 Accessibility elements from the frontmost window).
-
-### Fallback: use the engine without the plugin
-
-If you prefer not to install a plugin, the same engine plugs into `tools.media` as a CLI entry:
-
-```json5
-{ tools: { media: { models: [{
-  type: "cli",
-  command: "/absolute/path/to/ovp",
-  args: ["inspect", "{{AttachmentPath}}", "--level", "normal", "--max-chars", "{{MaxChars}}"],
-  capabilities: ["image"], maxChars: 1500, maxBytes: 10485760, timeoutSeconds: 20
-}] } } }
-```
-
-This path was the development harness and is fully verified (it is the source of every number in
-this README), but it has no `visual_inspect` tool and no `doctor`; the plugin adds those.
-
-## Permissions (this is where macOS plugins usually die silently)
-
-OVP needs two grants, given to **the process that runs OpenClaw** (the Gateway/node binary) — child processes inherit them, so `ovp` never needs its own entry:
-
-| Grant | Needed for | Without it |
+| | without OVP | with OVP |
 |---|---|---|
-| **Accessibility** | control roles/titles/actions, focused element | control reads are empty (`ui=0`) |
-| **Screen Recording** | window list with names, `screencapture` | window list returns unnamed rows; captures can be blank |
+| Tool calls for one image question | **11–16**, often without converging | **0** |
+| Tokens burned per image task | ≈ +16k in / +10.6k out vs. baseline | +≈0.4k in |
+| Task cost | ≈ $0.020 | ≈ $0.0027 |
+| Time to a useful answer | tens of seconds of self-derivation | **0.14–0.41 s** |
+| Where the image went | possibly a third-party vision API | nowhere — it never leaves the machine |
 
-System Settings → Privacy & Security → Accessibility / Screen Recording → add the OpenClaw process. `npm run doctor` reports exactly which one is missing, and `mode=doctor` does the same from inside an agent turn.
+The saving is not a smaller prompt. It is the **11–16 rounds the agent no longer invents.**
 
----
+## How it works
 
-## Usage
+![How OVP works](docs/flow.svg)
 
-Installed, the plugin contributes two things:
+Capture → metadata → Apple Vision OCR (bbox + confidence) → Accessibility tree → `CGWindowList` →
+region segmentation → priority classification → contract renderer. One Swift binary, **no
+third-party dependencies, no model weights, no network**.
 
-**1. Image understanding for inbound attachments.** Paste a screenshot into any OpenClaw chat: the media-understanding stage resolves the plugin's provider (local, no credentials) and the model receives a Visual State instead of an unreadable reference. Nothing to configure.
+## What the agent actually receives
 
-**2. The `visual_inspect` tool** for live/on-demand reads:
-
-| mode | what you get |
-|---|---|
-| `state` (default) | the full compact Visual State |
-| `headline` | ~400-char triage line (cheap "do I need more?" check) |
-| `grep` | substring search over the cached state — returns the match **plus its neighbours** (a label alone is rarely the answer) |
-| `region` | the contents of one `x,y,w,h` rectangle |
-| `json` | the raw Visual State (bboxes, classes, timings, cache state) |
-| `doctor` | permission + engine preflight |
-
-`source` selects `screen` (default), `window` (+ `window_id` from `ovp windows`), or `file` (+ `path`).
-
----
-
-## The contract (why agents stop re-deriving)
-
-The injected text is not a description; it is a contract designed for a text-only consumer:
+Not a description — a contract built for a text-only consumer:
 
 ```
 You are a text-only model. Do not call view_image. Visual information has been preprocessed by OVP and is provided below.
-HEADLINE: source=screenshot_file app=unknown | dialog=0 text=55 shown=23 ui=0 | alert=2 error=1 ... | truncated=true
+HEADLINE: source=screenshot_file app=unknown | dialog=0 text=55 shown=23 ui=0 | alert=2 error=1 | truncated=true
 ALERT/ERROR (3):
   ![1252,649,333,30] c=0.50 synthetic system dialog for
   ![1449,755,38,34] c=1.00 好
 TEXT (55 total, 20 shown):
   [r1/generic_region 316,94,380,30] OpenClaw … · ⑤ … · 127.0.0.1:18789/chat/main/…
 MORE: truncated=true hidden=text:28 ui:0 reg:6 dup:0 noise:4 | query: --grep <s> | --region x,y,w,h | --max-chars N | --headline-only
-ESCALATE: vlm:possible_dialog | local state is insufficient here; an opt-in vision call can resolve it (sends the image off-machine).
+ESCALATE: vlm:possible_dialog | local state is insufficient here; an opt-in vision call can resolve it.
 ```
 
 Four rules make it work:
 
-1. **The first line removes a guaranteed-failing round.** A text-only model cannot use `view_image`; saying so up front eliminated that wasted call in every measured run.
-2. **Priority, not reading order.** `dialog/alert > error > focused element > frontmost-window text > result-like > everything else`, with a two-pass classifier so a bare button label (`好`, `OK`) only counts as a dialog once dialog/error evidence exists. Alerts and errors are force-included even when the budget is exhausted.
-3. **Truncation is stated, and follow-up queries are real.** `truncated`, per-category hidden counts, and working `--grep` / `--region` / `--max-chars` / `--headline-only` verbs. Nobody has to guess what was dropped — measured: this is what turns 11–16 tool calls into 0.
-4. **Escalation is declared by the engine, not guessed by the model.** Two triggers came out of measured comparisons: `vlm:possible_dialog` (an alert smells present but no dialog structure was detected — typical for screenshot files, where there is no Accessibility tree) and `vlm:icon_heavy` (almost no text and almost no coverage: the frame is graphics/icons). Both are the cases where a hosted vision model genuinely adds value; both are opt-in.
+1. **The first line removes a guaranteed-failing round.** A text-only model cannot use `view_image`.
+   Saying so up front eliminated that wasted call in every measured run.
+2. **Priority, not reading order.** `dialog/alert > error > focused element > frontmost-window text >
+   result-like > everything else`, with a two-pass classifier so a bare button label (`好`, `OK`)
+   only counts as a dialog once dialog/error evidence exists. Alerts are force-included even when the
+   budget is exhausted.
+3. **Truncation is stated, and the follow-up queries are real.** `truncated`, per-category hidden
+   counts, and working `--grep` (returns matches *with their neighbours*), `--region`, `--max-chars`,
+   `--headline-only`. Nobody has to guess what was dropped.
+4. **Escalation is declared by the engine, not guessed by the model.** Two measured triggers:
+   `vlm:possible_dialog` (alert text present but no dialog *structure* — typical for screenshot
+   files, which have no Accessibility tree) and `vlm:icon_heavy` (almost no text and almost no
+   coverage: the frame is graphics). Both opt-in.
 
-Budget arithmetic matters: the fixed overhead (preamble + headline + follow-up contract) is ≈460 characters, so `maxChars` below ~800 leaves no room for content. Default is 1500 (≈350–400 tokens) which measured 20–28 lines of real content.
+## Compared with a hosted vision model
 
----
+Same images, same tasks, measured side by side ([MiniMax-VL-01](https://platform.minimax.io)):
 
-## What it reads
+| | OVP | hosted VLM |
+|---|---|---|
+| Cost per screenshot | **$0** | ≈ $0.0105 |
+| Latency | **0.14–0.41 s** | 11.8–31.2 s |
+| Success rate | **6/6** | 6/8 (dense screenshots timed out; 2/2 retries too) |
+| Determinism | same input → same output | two runs differed (similarity 0.564) |
+| Field-level accuracy (verifiable set) | 94% / 100% | 88% / 100% |
+| Coordinates, Accessibility roles, actions | ✅ | ❌ |
+| Works offline | ✅ | ❌ |
 
-- **Text**: Apple Vision OCR (`zh-Hans` + `en-US`, accurate), every item with a pixel bbox and a confidence. CJK confidence is systematically low (0.30–0.50) — it is *not* a failure signal.
-- **Controls**: Accessibility-first. On native and Chromium apps this is exact (roles, titles, values, actions like `AXPress`, focused element). Where the tree is absent or its geometry is invalid (Electron shells), invalid rects are dropped and the state says `ax_unreliable=true` rather than reporting wrong coordinates.
-- **Windows/apps**: `CGWindowList` — window ids, owners, titles, layers, z-order, frontmost app.
-- **Layout**: contrast-projection bands and column gutters → `generic_region`s, marked as heuristic (confidence 0.35) and never labelled with semantics.
+Two findings worth the read: the VLM **reconstructed a line that was clipped to a 16-pixel sliver**
+(where OVP returned garbage and marked it low-confidence) — it looks like higher accuracy until you
+check the pixels. And with an unbounded "list all the text" prompt it **timed out twice** on a dense
+screenshot. Use it as an *escalation*, not as the default. That is exactly what `ESCALATE:` is for.
 
-## What it does not do
+## Install
 
-- macOS only (Apple Vision, CGWindowList, AX have no portable equivalent here).
-- **No photo/chart/diagram semantics** — that needs a vision model. Use the escalation flag.
-- **No object or icon detection.** Icon-only toolbars with no text are unreadable; hover tooltips or templates are the fallback.
-- **Structured dialog detection in screenshots is unsolved** and documented as such: `VNDetectRectanglesRequest` saturates with small text-line rectangles and never surfaces a modal box; the "dimmed backdrop + bright centred panel" heuristic fails because **macOS alerts do not dim the background** (measured border-ring median luminance 240). Keyword classification plus the escalation flag is the honest answer for now.
-- **Live-screen caching is imperfect**: the menu-bar clock changes pixels, so repeated screen reads miss the pixel-hash cache. Image files hit it reliably (108 ms → 4 ms internally).
+```bash
+# ClawHub (once the release passes review)
+openclaw plugins install clawhub:@xuyuelun667-alt/ovp-macos
+# npm
+openclaw plugins install npm:@xuyuelun667-alt/ovp-macos
+```
+
+The package ships a **prebuilt universal engine** (`bin/ovp`, arm64 + x86_64), because
+`openclaw plugins install` runs with `--ignore-scripts` and cannot build anything at install time.
+
+<details>
+<summary>From source, or to rebuild the engine yourself</summary>
+
+```bash
+git clone https://github.com/xuyuelun667-alt/openclaw-plugin-ovp-macos
+cd openclaw-plugin-ovp-macos
+npm install
+npm run build:engine     # universal swift build -> ./bin/ovp (atomic replace)
+npm run build            # tsc -> ./dist
+npm test                 # 16 unit tests, no network or permissions needed
+
+openclaw plugins install "npm-pack:$(npm pack --silent)" --force --accept-capabilities
+```
+</details>
+
+## Setup and diagnostics
+
+```bash
+openclaw ovp setup              # wire it up (idempotent; --dry-run to preview)
+openclaw ovp doctor             # engine + Accessibility / Screen Recording preflight
+```
+
+`setup` computes the minimal diff, prints **every write with its reason**, applies it through
+`openclaw config set` (so it is validated and audited by the host, exactly as if you typed it), then
+re-runs the permission check. On an already wired install it says `already wired — nothing to change`.
+
+<details>
+<summary>What it writes (the manual equivalent)</summary>
+
+```bash
+openclaw config set agents.defaults.imageModel.primary ovp-macos/ovp-local
+openclaw config set tools.media.image.maxChars 1500
+openclaw config set tools.media.image.preferredModel ovp-macos
+openclaw config set tools.alsoAllow '["visual_inspect"]'
+openclaw daemon restart
+```
+</details>
+
+### Permissions (where macOS plugins usually die silently)
+
+Two grants, given to **the process that runs OpenClaw** (the Gateway/node binary) — child processes
+inherit them, so `ovp` never needs its own entry:
+
+| Grant | Needed for | Without it |
+|---|---|---|
+| **Accessibility** | control roles/titles/actions, focused element | control reads are empty (`ui=0`) |
+| **Screen Recording** | window list with names, `screencapture` | unnamed window rows; blank captures |
+
+`openclaw ovp doctor` (or the `visual_inspect` tool with `mode=doctor`) tells you exactly which one is
+missing and where to enable it.
+
+### Pitfall: `tools.allow` hides every profile tool — use `tools.alsoAllow`
+
+Plugin tools are **not** part of the `coding` profile, so an installed plugin tool is registered but
+invisible to the model. The obvious fix is wrong:
+
+```bash
+# ❌ REPLACES the profile's base allowlist — the agent then loses exec/read/web as well
+openclaw config set tools.allow '["visual_inspect"]'
+# ✅ additive: keeps the profile and adds the plugin tool
+openclaw config set tools.alsoAllow '["visual_inspect"]'
+```
+
+(`allow` and `alsoAllow` are mutually exclusive in the same scope.) We hit this while building the
+plugin: the agent surface collapsed to three tools and the plugin *looked* unregistered.
+
+Verify either way:
+
+```bash
+openclaw gateway call tools.effective --params '{"sessionKey":"main","agentId":"main"}' --json | grep -i visual_inspect
+openclaw agent --session-key agent:main:ovp-check -m "call visual_inspect with mode=doctor"
+```
+
+## Using the tool
+
+| mode | what you get |
+|---|---|
+| `state` (default) | the full compact Visual State for screen / window / file |
+| `headline` | ~400-char triage line — cheap "do I need more?" check |
+| `grep` | substring search over the cached state, **plus the match's neighbours** (a label alone is rarely the answer) |
+| `region` | the contents of one `x,y,w,h` rectangle |
+| `json` | raw Visual State: bboxes, classes, timings, cache state |
+| `doctor` | engine + permission preflight |
+
+## What it reads — and what it does not
+
+**Reads:** OCR text with pixel bboxes and confidence (CJK confidence runs 0.30–0.50 — low, and *not* a
+failure signal); Accessibility roles, titles, values and actions (exact on native and Chromium apps);
+window ids, owners, titles, z-order and the frontmost app; heuristic layout regions, marked as
+heuristic and never labelled with semantics.
+
+**Does not:**
+
+- **macOS only.** Apple Vision, `CGWindowList` and the Accessibility API are the value; there is no
+  portable equivalent worth faking.
+- **No photo / chart / diagram semantics** — that needs a vision model, which is what `ESCALATE` is for.
+- **No object or icon detection.** Icon-only toolbars stay unreadable; use tooltips or templates.
+- **Structured dialog detection in screenshots is unsolved**, and documented as such:
+  `VNDetectRectanglesRequest` saturates with small text-line rectangles and never surfaces a modal box,
+  and the "dimmed backdrop + bright panel" heuristic fails because **macOS alerts do not dim the
+  background** (measured border-ring median luminance 240). Keyword classification plus the escalation
+  flag is the honest answer today.
+- **Live-screen caching is imperfect**: the menu-bar clock changes pixels, so repeated screen reads
+  miss the pixel-hash cache. Image files hit it reliably (108 ms → 4 ms internally).
+- **Electron apps**: some report invalid Accessibility geometry; those rects are dropped and the state
+  says `ax_unreliable=true` instead of reporting wrong coordinates.
 
 ## Privacy
 
-Everything above runs locally. The plugin never calls a network API. The optional escalation is exactly that — optional: the state *flags* that a vision model would help and the agent (or you) decides whether to send the image somewhere.
+Everything above runs locally. The plugin never calls a network API. Escalation is opt-in: the state
+*flags* that a vision model would help, and you (or the agent) decide whether to send the image
+anywhere.
 
 ## Architecture
 
 ```
 openclaw-plugin-ovp-macos
 ├── src/                     plugin (TypeScript)
-│   ├── index.ts             registers the media-understanding provider + visual_inspect tool
+│   ├── index.ts             media-understanding provider + visual_inspect tool + `openclaw ovp` CLI
 │   ├── engine.ts            binary resolution, argument building, output parsing
-│   └── doctor.ts            permission preflight (Accessibility / Screen Recording)
+│   ├── doctor.ts            permission preflight (Accessibility / Screen Recording)
+│   └── setup.ts             idempotent config wiring for `openclaw ovp setup`
 ├── Sources/ovp/             the engine (Swift, no third-party dependencies)
 │   ├── Capture.swift        screen / window / file capture + image metadata
 │   ├── OCR.swift            Apple Vision text recognition
@@ -276,22 +242,29 @@ openclaw-plugin-ovp-macos
 └── scripts/                 build-engine.sh, doctor.sh
 ```
 
-The engine is a plain CLI (`ovp inspect …`, `ovp windows`, `ovp ax-check`), so it is usable without the plugin; the plugin only wires it into OpenClaw's image pipeline and exposes it as a tool. A resident daemon keeps the OCR model warm: first call after boot ≈0.7 s, warm calls 0.14–0.41 s.
+The engine is also a plain CLI (`ovp inspect …`, `ovp windows`, `ovp ax-check`), usable without the
+plugin. Two operational notes worth knowing:
 
-**Operational note:** the daemon is a long-lived process, so a rebuilt engine only takes effect after it is restarted (`ovp daemon --stop`; the next call starts a fresh one). `scripts/build-engine.sh` does this automatically. This bit us once during development: the CLI forwards to the daemon, so a stale daemon silently serves stale rendering logic.
-
-**Engine resolution order:** plugin config `path` → `OVP_BIN` → `<plugin>/bin/ovp` → `ovp` on `PATH`. The npm package does not ship a prebuilt binary (Gatekeeper quarantine + TCC grants are per-host decisions); build it locally with `npm run build:engine` and either leave it at `bin/ovp` or point the config at it.
+- **A resident daemon keeps the OCR model warm** (first call after boot ≈0.7 s, warm calls
+  0.14–0.41 s). A rebuilt engine only takes effect after it restarts — `scripts/build-engine.sh` does
+  that for you.
+- **Never overwrite a signed Mach-O in place.** Writing `bin/ovp` in place can leave the kernel's
+  code-signature cache stale and the next exec dies with `SIGKILL` (137 — reproduced while building
+  this). The build script writes to a temp name and `mv`s it into place.
 
 ## Development
 
 ```bash
-npm run build:engine     # engine (Swift -> ./bin/ovp; restarts a warm daemon)
-npm run build            # plugin (TypeScript -> ./dist)
-npm test                 # unit tests
-npm run doctor           # permission + engine preflight
-npm run plugin:inspect   # runtime state of the installed plugin
+npm run build:engine     # engine (universal, atomic replace, restarts a warm daemon)
+npm run build            # plugin
+npm test                 # 16 unit tests
+openclaw ovp doctor      # permissions
 ```
+
+CI runs the unit tests **and** builds the engine, renders a fixture image with Pillow, runs the real
+OCR path against it, and asserts the contract lines survive a 240-character budget. No screenshot is
+ever committed: fixtures are generated at run time.
 
 ## License
 
-MIT.
+MIT. Issues and macOS-specific war stories welcome.

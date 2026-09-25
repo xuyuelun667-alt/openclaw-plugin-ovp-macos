@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 400" width="960" height="400" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">
+  <rect width="960" height="400" rx="14" fill="#0d1117"/>
+  <text x="28" y="40" fill="#e6edf3" font-size="17" font-weight="700">OVP — local visual input substitute (macOS)</text>
+  <text x="28" y="63" fill="#8b949e" font-size="12">screenshot / window / live screen  ->  Apple Vision OCR + Accessibility  ->  compact Visual State  ->  text-only agent</text>
+
+  <!-- inputs -->
+  <g>
+    <rect x="28" y="92" width="150" height="34" rx="8" fill="#161b22" stroke="#30363d"/>
+    <text x="42" y="114" fill="#c9d1d9" font-size="12">screenshot file</text>
+    <rect x="28" y="134" width="150" height="34" rx="8" fill="#161b22" stroke="#30363d"/>
+    <text x="42" y="156" fill="#c9d1d9" font-size="12">window capture</text>
+    <rect x="28" y="176" width="150" height="34" rx="8" fill="#161b22" stroke="#30363d"/>
+    <text x="42" y="198" fill="#c9d1d9" font-size="12">live screen</text>
+    <text x="28" y="238" fill="#8b949e" font-size="11">no network</text>
+    <text x="28" y="256" fill="#8b949e" font-size="11">no model weights</text>
+  </g>
+
+  <path d="M186 151 H232" stroke="#58a6ff" stroke-width="2" marker-end="url(#a)"/>
+  <defs>
+    <marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 z" fill="#58a6ff"/>
+    </marker>
+  </defs>
+
+  <!-- engine -->
+  <rect x="236" y="92" width="330" height="200" rx="12" fill="#0f2417" stroke="#238636"/>
+  <text x="252" y="116" fill="#7ee787" font-size="12" font-weight="700">ovp engine (Swift, zero deps)</text>
+  <text x="256" y="142" fill="#c9d1d9" font-size="11.5">1  capture + image metadata</text>
+  <text x="256" y="166" fill="#c9d1d9" font-size="11.5">2  Vision OCR  ·  bbox + confidence</text>
+  <text x="256" y="190" fill="#c9d1d9" font-size="11.5">3  Accessibility tree  ·  roles/actions</text>
+  <text x="256" y="214" fill="#c9d1d9" font-size="11.5">4  CGWindowList  ·  app/window/z-order</text>
+  <text x="256" y="238" fill="#c9d1d9" font-size="11.5">5  regions  ·  priority classes</text>
+  <text x="256" y="262" fill="#7ee787" font-size="11.5">   alert &gt; error &gt; focus &gt; fg &gt; result</text>
+  <text x="256" y="284" fill="#8b949e" font-size="10.5">warm daemon: 0.14–0.41 s per frame</text>
+
+  <path d="M570 190 H616" stroke="#58a6ff" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- output -->
+  <rect x="620" y="92" width="312" height="200" rx="12" fill="#161b22" stroke="#30363d"/>
+  <text x="636" y="116" fill="#e6edf3" font-size="12" font-weight="700">Visual State (the injected block)</text>
+  <text x="640" y="142" fill="#d2a8ff" font-size="10.5">You are a text-only model. Do not call</text>
+  <text x="640" y="158" fill="#d2a8ff" font-size="10.5">view_image. …</text>
+  <text x="640" y="180" fill="#79c0ff" font-size="10.5">HEADLINE: source=screenshot_file …</text>
+  <text x="640" y="202" fill="#ffa657" font-size="10.5">ALERT/ERROR (3):</text>
+  <text x="640" y="220" fill="#c9d1d9" font-size="10.5">  ![1252,649] synthetic system dialog…</text>
+  <text x="640" y="242" fill="#c9d1d9" font-size="10.5">TEXT (55 total, 20 shown):</text>
+  <text x="640" y="264" fill="#c9d1d9" font-size="10.5">MORE: truncated=true hidden=text:28 …</text>
+  <text x="640" y="284" fill="#8b949e" font-size="10.5">~350 tokens · deterministic</text>
+
+  <!-- agent + escalation -->
+  <path d="M776 292 V330" stroke="#58a6ff" stroke-width="2" marker-end="url(#a)"/>
+  <rect x="620" y="334" width="312" height="44" rx="10" fill="#161b22" stroke="#30363d"/>
+  <text x="636" y="352" fill="#e6edf3" font-size="11.5">text-only agent: 0 tool calls, answers</text>
+  <text x="636" y="369" fill="#8b949e" font-size="10.5">(was: 11–16 tool calls of self-derivation)</text>
+
+  <path d="M236 300 V330" stroke="#d29922" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#b)"/>
+  <defs>
+    <marker id="b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 z" fill="#d29922"/>
+    </marker>
+  </defs>
+  <rect x="28" y="334" width="560" height="44" rx="10" fill="#2a1f04" stroke="#d29922"/>
+  <text x="44" y="352" fill="#e3b341" font-size="11.5">ESCALATE: vlm:possible_dialog | vlm:icon_heavy</text>
+  <text x="44" y="369" fill="#8b949e" font-size="10.5">engine-declared, opt-in only (~$0.01/call) — the two cases a local read cannot settle</text>
+</svg>
